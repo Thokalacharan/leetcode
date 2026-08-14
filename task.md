@@ -1,0 +1,29 @@
+# CodePulse Implementation Tasks
+
+- `[x]` Project Setup
+  - `[x]` Create root directory `package.json` for concurrent execution
+  - `[x]` Create `.env` and `.env.example` configurations
+  - `[x]` Set up project `.gitignore`
+- `[x]` Backend Implementation
+  - `[x]` Initialize backend project and install dependencies (`express`, `cors`, `dotenv`, `nodemailer`, `firebase-admin`)
+  - `[x]` Implement Database Service (local JSON file db + optional Firestore adapter)
+  - `[x]` Implement LeetCode API Service (GraphQL query logic for user profile, recent submissions, and question difficulty with cache)
+  - `[x]` Implement Email Notification Service (SMTP / Nodemailer with HTML templates)
+  - `[x]` Implement Tracker Coordinator (periodic polling, first-time baseline creation, duplicate checking)
+  - `[x]` Implement Express API Server (endpoints for stats, friends, activity feed, force-scan, and mock submission trigger)
+- `[x]` Frontend Dashboard Implementation
+  - `[x]` Initialize Vite React project and install Tailwind CSS
+  - `[x]` Set up Tailwind configuration and styling
+  - `[x]` Design Dashboard UI (overall layout, premium dark mode, glassmorphism elements)
+  - `[x]` Build Friends Status component
+  - `[x]` Build Recent Activity Feed component
+  - `[x]` Build Statistics Card component
+  - `[x]` Build Mock Control Panel for real-time testing
+  - `[x]` Integrate frontend with backend API (fetching stats, friends, activity, manual scans)
+- `[x]` Testing & Verification
+  - `[x]` Run baseline test for 7 friends
+  - `[x]` Test mock activity submission (verify email, storage, and duplicate prevention)
+  - `[x]` Verify error handling (invalid URLs, temporary API failures)
+- `[x]` Final Polish & Documentation
+  - `[x]` Create clean project README.md
+  - `[x]` Clean up code comments and console logs
