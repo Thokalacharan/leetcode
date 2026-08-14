@@ -216,12 +216,25 @@ async function getStats() {
   };
 }
 
+// 7. Delete Friend
+async function deleteFriend(friendId) {
+  if (useMongoDB) {
+    await db.collection('friends').deleteOne({ id: friendId });
+  } else {
+    delete localData.friends[friendId];
+    saveLocalDb();
+  }
+  return { success: true, deletedId: friendId };
+}
+
 module.exports = {
   initialize,
   getFriends,
   updateFriend,
+  deleteFriend,
   saveSubmission,
   isSubmissionProcessed,
   getRecentSubmissions,
   getStats
 };
+

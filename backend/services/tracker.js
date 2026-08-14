@@ -5,43 +5,157 @@ const email = require('./email');
 let intervalId = null;
 let isScanning = false;
 
-// Parse username from a LeetCode profile URL
-function extractUsername(url) {
-  if (!url) return null;
-  // Clean trailing slash
-  let cleanUrl = url.trim().replace(/\/$/, "");
+// Parse username from a LeetCode profile URL or raw username string
+function extractUsername(input) {
+  if (!input) return null;
+  let clean = input.trim().replace(/\/$/, "");
+  
   // Match leetcode.com/u/username or leetcode.com/username
-  let match = cleanUrl.match(/\/u\/([a-zA-Z0-9_\-]+)/);
+  let match = clean.match(/\/u\/([a-zA-Z0-9_\-]+)/);
   if (match) return match[1];
   
-  match = cleanUrl.match(/leetcode\.com\/([a-zA-Z0-9_\-]+)/);
+  match = clean.match(/leetcode\.com\/([a-zA-Z0-9_\-]+)/);
   if (match) return match[1];
+  
+  // Match plain username
+  if (/^[a-zA-Z0-9_\-]+$/.test(clean)) {
+    return clean;
+  }
   
   return null;
 }
 
-// Get the configured list of friends from environment variables
+// Get friends configured from .env variables dynamically
 function getConfiguredFriends() {
   const friends = [];
-  for (let i = 1; i <= 7; i++) {
-    const name = process.env[`FRIEND_${i}_NAME`] || `Friend ${i}`;
-    const url = process.env[`FRIEND_${i}_URL`];
-    
-    if (url) {
-      const username = extractUsername(url);
-      if (username) {
-        friends.push({
-          id: username.toLowerCase(),
-          username,
-          displayName: name,
-          profileUrl: url
-        });
-      } else {
-        console.warn(`[Tracker] Could not extract username for friend ${name} from URL: ${url}`);
+  const envKeys = Object.keys(process.env);
+  
+  envKeys.forEach(key => {
+    const match = key.match(/^FRIEND_(\d+)_URL$/i);
+    if (match) {
+      const idx = match[1];
+      const url = process.env[key];
+      const name = process.env[`FRIEND_${idx}_NAME`];
+      
+      if (url) {
+        const username = extractUsername(url);
+        if (username) {
+          friends.push({
+            id: username.toLowerCase(),
+            username,
+            displayName: name || username,
+            profileUrl: `https://leetcode.com/u/${username}/`
+          });
+        }
       }
     }
-  }
+  });
   return friends;
+}
+
+// Merge env-configured friends and database friends
+async function getAllTrackableFriends() {
+  const dbFriends = await database.getFriends();
+  const envFriends = getConfiguredFriends();
+  
+  const map = new Map();
+  
+  // Add database stored friends first
+  Object.values(dbFriends).forEach(f => {
+    if (f && f.id) {
+      map.set(f.id, f);
+    }
+  });
+
+  // Seed with env friends if not already present in DB
+  for (const envF of envFriends) {
+    if (!map.has(envF.id)) {
+      map.set(envF.id, envF);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+// Add a new friend dynamically (from Dashboard or API)
+async function addNewFriend(displayName, profileUrlOrUsername) {
+  const username = extractUsername(profileUrlOrUsername);
+  if (!username) {
+    throw new Error("Invalid LeetCode Profile URL or username. Example: https://leetcode.com/u/username/ or username");
+  }
+
+  const friendId = username.toLowerCase();
+  const profileUrl = `https://leetcode.com/u/${username}/`;
+  const name = displayName && displayName.trim() ? displayName.trim() : username;
+
+  console.log(`[Tracker] Adding new friend: ${name} (${username})...`);
+
+  // 1. Fetch user profile from LeetCode GraphQL
+  const profile = await leetcode.fetchUserProfile(username);
+  
+  const friendData = {
+    id: friendId,
+    username: username,
+    displayName: name,
+    profileUrl: profileUrl,
+    avatar: profile ? profile.avatar : "https://assets.leetcode.com/users/default_avatar.png",
+    ranking: profile ? profile.ranking : null,
+    totalSolved: profile ? profile.totalSolved : 0,
+    easySolved: profile ? profile.easySolved : 0,
+    mediumSolved: profile ? profile.mediumSolved : 0,
+    hardSolved: profile ? profile.hardSolved : 0,
+    status: "active",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  // 2. Fetch recent submissions to establish baseline without spamming emails
+  const submissions = await leetcode.fetchRecentAcceptedSubmissions(username, 5);
+  if (submissions && submissions.length > 0) {
+    console.log(`[Tracker] Storing ${submissions.length} baseline submission(s) for newly added friend ${name}`);
+    for (const sub of submissions) {
+      const details = await leetcode.fetchQuestionDetails(sub.titleSlug);
+      await database.saveSubmission({
+        id: sub.id,
+        friendId: friendId,
+        friendDisplayName: name,
+        problemTitle: sub.title,
+        problemSlug: sub.titleSlug,
+        questionId: details.questionId,
+        difficulty: details.difficulty,
+        timestamp: Number(sub.timestamp),
+        statusDisplay: "Accepted",
+        lang: "Unknown",
+        notified: false
+      });
+    }
+
+    const latest = submissions[0];
+    const latestDetails = await leetcode.fetchQuestionDetails(latest.titleSlug);
+    friendData.lastActiveTime = Number(latest.timestamp);
+    friendData.lastProblemTitle = latest.title;
+    friendData.lastProblemSlug = latest.titleSlug;
+    friendData.lastProblemDifficulty = latestDetails.difficulty;
+  }
+
+  // 3. Save to database
+  const saved = await database.updateFriend(friendId, friendData);
+  console.log(`[Tracker] Friend ${name} successfully added and saved to database.`);
+  return saved;
+}
+
+// Delete a friend
+async function removeFriend(friendId) {
+  const cleanId = (friendId || '').toLowerCase().trim();
+  console.log(`[Tracker] Removing friend: ${cleanId}`);
+  return await database.deleteFriend(cleanId);
+}
+
+// Edit a friend's details (e.g. display name)
+async function editFriend(friendId, updates) {
+  const cleanId = (friendId || '').toLowerCase().trim();
+  console.log(`[Tracker] Updating friend: ${cleanId}`);
+  return await database.updateFriend(cleanId, updates);
 }
 
 // Perform active checks for all friends
@@ -54,10 +168,10 @@ async function scanFriendsActivity() {
   isScanning = true;
   console.log(`[Tracker] [${new Date().toLocaleTimeString()}] Starting activity check...`);
   
-  const configuredFriends = getConfiguredFriends();
+  const friendsToScan = await getAllTrackableFriends();
   const dbFriends = await database.getFriends();
   
-  for (const friend of configuredFriends) {
+  for (const friend of friendsToScan) {
     try {
       console.log(`[Tracker] Checking ${friend.displayName} (${friend.username})...`);
       
@@ -70,8 +184,8 @@ async function scanFriendsActivity() {
 
       let updatedFriendDetails = {
         username: friend.username,
-        displayName: friend.displayName,
-        profileUrl: friend.profileUrl,
+        displayName: friend.displayName || friend.username,
+        profileUrl: friend.profileUrl || `https://leetcode.com/u/${friend.username}/`,
         updatedAt: new Date().toISOString()
       };
 
@@ -80,20 +194,23 @@ async function scanFriendsActivity() {
           ...updatedFriendDetails,
           avatar: profile.avatar,
           ranking: profile.ranking,
+          totalSolved: profile.totalSolved,
+          easySolved: profile.easySolved,
+          mediumSolved: profile.mediumSolved,
+          hardSolved: profile.hardSolved,
           status: "active"
         };
       } else {
-        console.warn(`[Tracker] Profile details temporarily unavailable for ${friend.username}`);
-        // Maintain local profile cache or mark inactive if never loaded
         updatedFriendDetails.status = existingFriend ? existingFriend.status : "inactive";
         if (existingFriend) {
           updatedFriendDetails.avatar = existingFriend.avatar;
           updatedFriendDetails.ranking = existingFriend.ranking;
+          updatedFriendDetails.totalSolved = existingFriend.totalSolved;
+          updatedFriendDetails.easySolved = existingFriend.easySolved;
+          updatedFriendDetails.mediumSolved = existingFriend.mediumSolved;
+          updatedFriendDetails.hardSolved = existingFriend.hardSolved;
         }
       }
-
-      // Update friend in DB
-      existingFriend = await database.updateFriend(friend.id, updatedFriendDetails);
 
       // 2. Fetch recent submissions from LeetCode
       const submissions = await leetcode.fetchRecentAcceptedSubmissions(friend.username, 5);
@@ -102,7 +219,6 @@ async function scanFriendsActivity() {
         if (isFirstTime) {
           console.log(`[Tracker] First time tracking ${friend.displayName}. Creating baseline with ${submissions.length} submission(s) without notification.`);
           
-          // Save all fetched submissions to database as processed (notified: false)
           for (let i = 0; i < submissions.length; i++) {
             const sub = submissions[i];
             const details = await leetcode.fetchQuestionDetails(sub.titleSlug);
@@ -110,6 +226,7 @@ async function scanFriendsActivity() {
             await database.saveSubmission({
               id: sub.id,
               friendId: friend.id,
+              friendDisplayName: friend.displayName || friend.username,
               problemTitle: sub.title,
               problemSlug: sub.titleSlug,
               questionId: details.questionId,
@@ -121,23 +238,19 @@ async function scanFriendsActivity() {
             });
           }
 
-          // Update friend's last activity baseline
           const latestSub = submissions[0];
-          await database.updateFriend(friend.id, {
-            lastActiveTime: Number(latestSub.timestamp),
-            lastProblemTitle: latestSub.title,
-            lastProblemSlug: latestSub.titleSlug,
-            status: "active"
-          });
+          const latestDetails = await leetcode.fetchQuestionDetails(latestSub.titleSlug);
+          updatedFriendDetails.lastActiveTime = Number(latestSub.timestamp);
+          updatedFriendDetails.lastProblemTitle = latestSub.title;
+          updatedFriendDetails.lastProblemSlug = latestSub.titleSlug;
+          updatedFriendDetails.lastProblemDifficulty = latestDetails.difficulty;
+          updatedFriendDetails.status = "active";
 
         } else {
           // Process recent submissions to find genuinely new ones
-          // LeetCode returns submissions sorted descending by timestamp, so we process oldest-to-newest
-          // to trigger emails in chronological order.
           const newSubmissions = [];
           for (const sub of submissions) {
             const isProcessed = await database.isSubmissionProcessed(sub.id);
-            // Also check if timestamp is newer than friend's recorded lastActiveTime
             const isNewer = !existingFriend.lastActiveTime || Number(sub.timestamp) > existingFriend.lastActiveTime;
 
             if (!isProcessed && isNewer) {
@@ -158,12 +271,14 @@ async function scanFriendsActivity() {
               let emailSent = false;
               try {
                 const mailRes = await email.sendSubmissionNotification(
-                  friend.displayName,
+                  friend.displayName || friend.username,
                   sub.title,
                   details.questionId,
                   details.difficulty,
                   sub.timestamp,
-                  sub.titleSlug
+                  sub.titleSlug,
+                  sub.id,
+                  friend.username
                 );
                 emailSent = mailRes.success;
               } catch (mailError) {
@@ -174,6 +289,7 @@ async function scanFriendsActivity() {
               await database.saveSubmission({
                 id: sub.id,
                 friendId: friend.id,
+                friendDisplayName: friend.displayName || friend.username,
                 problemTitle: sub.title,
                 problemSlug: sub.titleSlug,
                 questionId: details.questionId,
@@ -185,12 +301,11 @@ async function scanFriendsActivity() {
               });
 
               // Update last active details
-              await database.updateFriend(friend.id, {
-                lastActiveTime: Number(sub.timestamp),
-                lastProblemTitle: sub.title,
-                lastProblemSlug: sub.titleSlug,
-                status: "active"
-              });
+              updatedFriendDetails.lastActiveTime = Number(sub.timestamp);
+              updatedFriendDetails.lastProblemTitle = sub.title;
+              updatedFriendDetails.lastProblemSlug = sub.titleSlug;
+              updatedFriendDetails.lastProblemDifficulty = details.difficulty;
+              updatedFriendDetails.status = "active";
             }
           } else {
             console.log(`[Tracker] No new activity for ${friend.displayName}.`);
@@ -198,14 +313,17 @@ async function scanFriendsActivity() {
         }
       } else {
         console.log(`[Tracker] No recent submissions returned for ${friend.displayName}.`);
-        // If the user was active, check if they have become inactive (e.g. no activity in 7 days)
         if (existingFriend && existingFriend.lastActiveTime) {
           const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
           if (existingFriend.lastActiveTime < sevenDaysAgo) {
-            await database.updateFriend(friend.id, { status: "inactive" });
+            updatedFriendDetails.status = "inactive";
           }
         }
       }
+
+      // Update friend in DB with latest stats
+      await database.updateFriend(friend.id, updatedFriendDetails);
+
     } catch (friendError) {
       console.error(`[Tracker] Error checking activity for ${friend.displayName}:`, friendError.message);
     }
@@ -220,49 +338,41 @@ async function scanFriendsActivity() {
 async function triggerMockSubmission(friendId, problemTitle, difficulty, statusDisplay = "Accepted") {
   console.log(`[Tracker] Triggering mock submission for ${friendId}: ${problemTitle} (${difficulty})...`);
   
-  // Make sure friend exists in DB, or create them
   const dbFriends = await database.getFriends();
   let friend = dbFriends[friendId];
   
   if (!friend) {
-    // Initialize standard mock friend
     friend = await database.updateFriend(friendId, {
+      id: friendId,
       username: friendId,
       displayName: friendId.charAt(0).toUpperCase() + friendId.slice(1),
       profileUrl: `https://leetcode.com/u/${friendId}/`,
       avatar: "https://assets.leetcode.com/users/default_avatar.png",
-      ranking: 99999,
+      ranking: null,
       status: "active"
     });
   }
 
   const submissionId = "mock_" + Math.floor(Math.random() * 1000000000);
   const timestamp = Math.floor(Date.now() / 1000);
-  const problemSlug = problemTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const problemSlug = problemTitle.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-');
 
-  // Map popular simulation problem names to actual question numbers
-  let questionId = "1";
-  const nameLower = problemTitle.toLowerCase();
-  if (nameLower.includes("two sum")) questionId = "1";
-  else if (nameLower.includes("lru cache")) questionId = "146";
-  else if (nameLower.includes("longest substring")) questionId = "3";
-  else if (nameLower.includes("word search")) questionId = "79";
-  else if (nameLower.includes("rotate image")) questionId = "48";
-  else if (nameLower.includes("merge k sorted")) questionId = "23";
-  else if (nameLower.includes("climbing stairs")) questionId = "70";
-  else if (nameLower.includes("best time to buy")) questionId = "121";
-  else questionId = String(Math.floor(Math.random() * 2000) + 1);
+  // Fetch real details dynamically from LeetCode GraphQL
+  const details = await leetcode.fetchQuestionDetails(problemSlug);
+  const resolvedDifficulty = (details && details.difficulty !== 'Unknown') ? details.difficulty : (difficulty || 'Easy');
+  const resolvedQuestionId = (details && details.questionId !== 'Unknown') ? details.questionId : String(Math.floor(Math.random() * 2500) + 1);
 
   // Trigger Email
   let emailSent = false;
   try {
     const mailRes = await email.sendSubmissionNotification(
-      friend.displayName,
+      friend.displayName || friend.username,
       problemTitle,
-      questionId,
-      difficulty,
+      resolvedQuestionId,
+      resolvedDifficulty,
       timestamp,
-      problemSlug
+      problemSlug,
+      submissionId
     );
     emailSent = mailRes.success;
   } catch (mailError) {
@@ -273,10 +383,11 @@ async function triggerMockSubmission(friendId, problemTitle, difficulty, statusD
   const submissionData = await database.saveSubmission({
     id: submissionId,
     friendId: friend.id,
+    friendDisplayName: friend.displayName || friend.username,
     problemTitle,
     problemSlug,
-    questionId,
-    difficulty,
+    questionId: resolvedQuestionId,
+    difficulty: resolvedDifficulty,
     timestamp,
     statusDisplay,
     lang: "python3",
@@ -288,6 +399,7 @@ async function triggerMockSubmission(friendId, problemTitle, difficulty, statusD
     lastActiveTime: timestamp,
     lastProblemTitle: problemTitle,
     lastProblemSlug: problemSlug,
+    lastProblemDifficulty: resolvedDifficulty,
     status: "active"
   });
 
@@ -299,7 +411,7 @@ async function triggerMockSubmission(friendId, problemTitle, difficulty, statusD
 
 // Start scheduling interval
 function start() {
-  const intervalMinutes = parseFloat(process.env.CHECK_INTERVAL_MINUTES) || 5;
+  const intervalMinutes = parseFloat(process.env.CHECK_INTERVAL_MINUTES) || 0.5;
   const intervalMs = intervalMinutes * 60 * 1000;
   
   console.log(`[Tracker] Starting activity tracker. Check interval: ${intervalMinutes} minutes.`);
@@ -328,5 +440,9 @@ module.exports = {
   start,
   stop,
   scanNow: scanFriendsActivity,
-  triggerMockSubmission
+  addNewFriend,
+  removeFriend,
+  editFriend,
+  triggerMockSubmission,
+  extractUsername
 };

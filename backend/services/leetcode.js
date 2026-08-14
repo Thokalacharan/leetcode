@@ -53,7 +53,7 @@ async function queryLeetCode(query, variables) {
   }
 }
 
-// 1. Fetch User Profile
+// 1. Fetch User Profile & Problem Stats
 async function fetchUserProfile(username) {
   const query = `
     query userProfile($username: String!) {
@@ -64,6 +64,12 @@ async function fetchUserProfile(username) {
           userAvatar
           realName
         }
+        submitStatsGlobal {
+          acSubmissionNum {
+            difficulty
+            count
+          }
+        }
       }
     }
   `;
@@ -73,11 +79,21 @@ async function fetchUserProfile(username) {
     if (!data || !data.matchedUser) {
       return null;
     }
+    const acList = (data.matchedUser.submitStatsGlobal && data.matchedUser.submitStatsGlobal.acSubmissionNum) || [];
+    const totalSolved = acList.find(i => i.difficulty === 'All')?.count || 0;
+    const easySolved = acList.find(i => i.difficulty === 'Easy')?.count || 0;
+    const mediumSolved = acList.find(i => i.difficulty === 'Medium')?.count || 0;
+    const hardSolved = acList.find(i => i.difficulty === 'Hard')?.count || 0;
+
     return {
       username: data.matchedUser.username,
-      realName: data.matchedUser.profile.realName,
-      ranking: data.matchedUser.profile.ranking,
-      avatar: data.matchedUser.profile.userAvatar
+      realName: data.matchedUser.profile ? data.matchedUser.profile.realName : null,
+      ranking: data.matchedUser.profile ? data.matchedUser.profile.ranking : null,
+      avatar: data.matchedUser.profile ? data.matchedUser.profile.userAvatar : null,
+      totalSolved,
+      easySolved,
+      mediumSolved,
+      hardSolved
     };
   } catch (error) {
     console.error(`[LeetCode] Failed to fetch profile for user ${username}:`, error.message);

@@ -1,0 +1,8 @@
+# Local Environment Secrets
+.env
+
+# Server Dependency Packages
+node_modules/
+
+# Local Databases and Caches
+data/
