@@ -12,7 +12,8 @@ router.put('/friends/:id', apiController.updateFriend);
 router.get('/activity', apiController.getActivity);
 router.get('/stats', apiController.getStats);
 
-// --- Tracker Actions ---
+// --- Tracker Actions (Supports both GET & POST for cronjobs and keep-alive pingers) ---
+router.get('/check-now', apiController.checkNow);
 router.post('/check-now', apiController.checkNow);
 
 // --- AI Problem Assistant Chatbot ---
