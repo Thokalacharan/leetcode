@@ -22,7 +22,10 @@ async function initialize() {
   if (uri) {
     try {
       console.log("[DB] Connecting to MongoDB Atlas...");
-      client = new MongoClient(uri);
+      client = new MongoClient(uri, {
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 10000
+      });
       await client.connect();
       db = client.db('codepulse');
       useMongoDB = true;
@@ -68,6 +71,66 @@ function saveLocalDb() {
   }
 }
 
+const DEFAULT_SEED_FRIENDS = {
+  "rakesh_regala": {
+    "id": "rakesh_regala",
+    "username": "rakesh_regala",
+    "displayName": "Rakesh",
+    "profileUrl": "https://leetcode.com/u/rakesh_regala/",
+    "status": "active"
+  },
+  "prakash-2736": {
+    "id": "prakash-2736",
+    "username": "prakash-2736",
+    "displayName": "I.Prakash",
+    "profileUrl": "https://leetcode.com/u/prakash-2736/",
+    "status": "active"
+  },
+  "shaikmsameer": {
+    "id": "shaikmsameer",
+    "username": "shaikmsameer",
+    "displayName": "Sameer",
+    "profileUrl": "https://leetcode.com/u/shaikmsameer/",
+    "status": "active"
+  },
+  "aetewnrn28": {
+    "id": "aetewnrn28",
+    "username": "aETewnRn28",
+    "displayName": "Vyshnavi",
+    "profileUrl": "https://leetcode.com/u/aETewnRn28/",
+    "status": "active"
+  },
+  "leela_338": {
+    "id": "leela_338",
+    "username": "Leela_338",
+    "displayName": "Leela",
+    "profileUrl": "https://leetcode.com/u/Leela_338/",
+    "status": "active"
+  },
+  "peramdurgashankar18": {
+    "id": "peramdurgashankar18",
+    "username": "peramdurgashankar18",
+    "displayName": "shankar",
+    "profileUrl": "https://leetcode.com/u/peramdurgashankar18/",
+    "status": "active"
+  },
+  "jeshva-praveen": {
+    "id": "jeshva-praveen",
+    "username": "Jeshva-Praveen",
+    "displayName": "Praveen",
+    "profileUrl": "https://leetcode.com/u/Jeshva-Praveen/",
+    "status": "active"
+  }
+};
+
+async function seedDefaultFriends() {
+  console.log("[DB] Seeding default friends roster...");
+  for (const [id, f] of Object.entries(DEFAULT_SEED_FRIENDS)) {
+    await updateFriend(id, f);
+  }
+  return DEFAULT_SEED_FRIENDS;
+}
+
 // 1. Get Friends
 async function getFriends() {
   if (useMongoDB) {
@@ -76,8 +139,14 @@ async function getFriends() {
     list.forEach(item => {
       friends[item.id] = item;
     });
+    if (Object.keys(friends).length === 0) {
+      return await seedDefaultFriends();
+    }
     return friends;
   } else {
+    if (!localData.friends || Object.keys(localData.friends).length === 0) {
+      return await seedDefaultFriends();
+    }
     return localData.friends;
   }
 }

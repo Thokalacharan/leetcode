@@ -53,6 +53,16 @@ function getConfiguredFriends() {
   return friends;
 }
 
+const DEFAULT_INITIAL_FRIENDS = [
+  { username: "rakesh_regala", displayName: "Rakesh" },
+  { username: "prakash-2736", displayName: "I.Prakash" },
+  { username: "shaikmsameer", displayName: "Sameer" },
+  { username: "aETewnRn28", displayName: "Vyshnavi" },
+  { username: "Leela_338", displayName: "Leela" },
+  { username: "peramdurgashankar18", displayName: "shankar" },
+  { username: "Jeshva-Praveen", displayName: "Praveen" }
+];
+
 // Merge env-configured friends and database friends
 async function getAllTrackableFriends() {
   const dbFriends = await database.getFriends();
@@ -71,6 +81,24 @@ async function getAllTrackableFriends() {
   for (const envF of envFriends) {
     if (!map.has(envF.id)) {
       map.set(envF.id, envF);
+    }
+  }
+
+  // If database is currently completely empty, automatically seed initial friend roster
+  if (map.size === 0) {
+    console.log("[Tracker] Empty friends database detected. Seeding with initial friend list...");
+    for (const defF of DEFAULT_INITIAL_FRIENDS) {
+      const friendObj = {
+        id: defF.username.toLowerCase(),
+        username: defF.username,
+        displayName: defF.displayName,
+        profileUrl: `https://leetcode.com/u/${defF.username}/`,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await database.updateFriend(friendObj.id, friendObj);
+      map.set(friendObj.id, friendObj);
     }
   }
 
