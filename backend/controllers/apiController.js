@@ -102,6 +102,8 @@ async function askAI(req, res, next) {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+}
+
 // 9. Test Email Trigger
 async function testEmail(req, res, next) {
   try {
