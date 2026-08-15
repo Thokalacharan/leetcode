@@ -2,22 +2,34 @@ const nodemailer = require('nodemailer');
 
 // Create SMTP transport if configured
 function getTransporter() {
-  const host = process.env.EMAIL_HOST;
-  const port = process.env.EMAIL_PORT || 587;
   const user = process.env.EMAIL_USER;
   const pass = process.env.EMAIL_PASSWORD;
 
-  if (!host || !user || !pass) {
+  if (!user || !pass) {
     return null;
   }
 
+  // Using service: 'gmail' uses SSL port 465 automatically, which bypasses cloud firewall throttling on port 587
+  if (!process.env.EMAIL_HOST || process.env.EMAIL_HOST.includes('gmail')) {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: user.trim(),
+        pass: pass.trim()
+      }
+    });
+  }
+
+  const host = process.env.EMAIL_HOST;
+  const port = parseInt(process.env.EMAIL_PORT) || 465;
+
   return nodemailer.createTransport({
     host,
-    port: parseInt(port),
-    secure: parseInt(port) === 465,
+    port,
+    secure: port === 465,
     auth: {
-      user,
-      pass
+      user: user.trim(),
+      pass: pass.trim()
     }
   });
 }
