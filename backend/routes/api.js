@@ -16,6 +16,9 @@ router.get('/stats', apiController.getStats);
 router.get('/check-now', apiController.checkNow);
 router.post('/check-now', apiController.checkNow);
 
+// --- Diagnostics & Email Testing ---
+router.get('/test-email', apiController.testEmail);
+
 // --- AI Problem Assistant Chatbot ---
 router.post('/ai/chat', apiController.askAI);
 

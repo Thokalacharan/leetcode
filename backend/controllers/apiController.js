@@ -102,6 +102,24 @@ async function askAI(req, res, next) {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+// 9. Test Email Trigger
+async function testEmail(req, res, next) {
+  try {
+    const email = require('../services/email');
+    const result = await email.sendSubmissionNotification(
+      "Charan Test",
+      "Add Binary",
+      "67",
+      "Easy",
+      Math.floor(Date.now() / 1000),
+      "add-binary",
+      "2107938952",
+      "CHARAN_THOKALA"
+    );
+    res.json({ success: true, result, sentTo: process.env.EMAIL_TO, configuredUser: process.env.EMAIL_USER });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 }
 
 module.exports = {
@@ -112,5 +130,6 @@ module.exports = {
   getActivity,
   getStats,
   checkNow,
-  askAI
+  askAI,
+  testEmail
 };
