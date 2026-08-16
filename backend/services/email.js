@@ -9,19 +9,22 @@ function getTransporter() {
     return null;
   }
 
-  // Using service: 'gmail' uses SSL port 465 automatically, which bypasses cloud firewall throttling on port 587
-  if (!process.env.EMAIL_HOST || process.env.EMAIL_HOST.includes('gmail')) {
+  const host = process.env.EMAIL_HOST || 'smtp.gmail.com';
+  const port = parseInt(process.env.EMAIL_PORT) || 465;
+  const isGmail = host.includes('gmail') || (!process.env.EMAIL_HOST);
+
+  if (isGmail) {
     return nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: user.trim(),
         pass: pass.trim()
-      }
+      },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 8000
     });
   }
-
-  const host = process.env.EMAIL_HOST;
-  const port = parseInt(process.env.EMAIL_PORT) || 465;
 
   return nodemailer.createTransport({
     host,
@@ -30,8 +33,41 @@ function getTransporter() {
     auth: {
       user: user.trim(),
       pass: pass.trim()
-    }
+    },
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 8000
   });
+}
+
+// Send via Resend HTTP API (works 100% on Render Free Tier via HTTPS Port 443)
+async function sendViaResend(to, from, subject, text, html) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return null;
+
+  const sender = from || 'CodePulse Tracker <onboarding@resend.dev>';
+  
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey.trim()}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: sender.includes('@resend.dev') ? 'CodePulse Tracker <onboarding@resend.dev>' : sender,
+      to: [to],
+      subject: subject,
+      text: text,
+      html: html
+    })
+  });
+
+  const resData = await response.json();
+  if (!response.ok) {
+    throw new Error(resData.message || resData.error || 'Resend HTTP API failed');
+  }
+
+  return { success: true, messageId: resData.id };
 }
 
 // Generate premium, email-client compatible HTML template
@@ -228,12 +264,28 @@ async function sendSubmissionNotification(friendName, problemTitle, questionId, 
 
   const textContent = `🔥 ${friendName} just solved a LeetCode problem!\n\nProblem: #${questionId} ${problemTitle}\nDifficulty: ${difficulty}\nTime: ${new Date(Number(timestamp) * 1000).toLocaleTimeString()}\n\nSolve Problem: https://leetcode.com/problems/${problemSlug}/${subLinkText}\n\nYour friend is solving. Your turn! 💪`;
 
+  // 1. Try sending via Resend HTTP API if configured (bypasses all cloud firewall/port blocking)
+  if (process.env.RESEND_API_KEY) {
+    try {
+      console.log(`[Email] Dispatching via Resend HTTP API to ${to}...`);
+      const resendResult = await sendViaResend(to, from, subject, textContent, htmlContent);
+      if (resendResult && resendResult.success) {
+        console.log(`[Email] Notification email delivered successfully via Resend API to ${to}. MessageId: ${resendResult.messageId}`);
+        return resendResult;
+      }
+    } catch (resendError) {
+      console.error("[Email] Resend API error:", resendError.message);
+    }
+  }
+
+  // 2. Fallback to Nodemailer SMTP
   if (!transporter) {
-    console.warn(`[Email] [MISSING CONFIG] SMTP details (EMAIL_USER / EMAIL_PASSWORD) missing in environment variables. Cannot dispatch email to: ${to}`);
-    return { success: false, silent: true, error: "SMTP credentials not configured" };
+    console.warn(`[Email] [MISSING CONFIG] Neither RESEND_API_KEY nor SMTP credentials (EMAIL_USER / EMAIL_PASSWORD) are configured. Cannot dispatch email to: ${to}`);
+    return { success: false, silent: true, error: "Email credentials not configured" };
   }
 
   try {
+    console.log(`[Email] Dispatching via SMTP to ${to}...`);
     const info = await transporter.sendMail({
       from,
       to,
@@ -244,7 +296,7 @@ async function sendSubmissionNotification(friendName, problemTitle, questionId, 
     console.log(`[Email] Notification email sent successfully to ${to}. MessageId: ${info.messageId}`);
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error("[Email] Failed to send notification email:", error);
+    console.error("[Email] Failed to send notification email via SMTP:", error.message);
     throw error;
   }
 }
