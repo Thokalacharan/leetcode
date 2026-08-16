@@ -276,13 +276,17 @@ async function scanFriendsActivity() {
             updatedFriendDetails.status = "active";
 
           } else {
-            // Process recent submissions to find genuinely new ones
+            // Process recent submissions to find genuinely new ones or retry unnotified submissions
             const newSubmissions = [];
             for (const sub of submissions) {
-              const isProcessed = await database.isSubmissionProcessed(sub.id);
+              const existingSub = await database.getSubmission(sub.id);
               const isNewer = !existingFriend.lastActiveTime || Number(sub.timestamp) > existingFriend.lastActiveTime;
 
-              if (!isProcessed && isNewer) {
+              if (!existingSub && isNewer) {
+                newSubmissions.push(sub);
+              } else if (existingSub && existingSub.notified === false && isNewer) {
+                // Retry dispatching email if previous attempt failed or SMTP wasn't configured
+                console.log(`[Tracker] Retrying notification email for unnotified submission: ${sub.title} (${sub.id})`);
                 newSubmissions.push(sub);
               }
             }

@@ -229,9 +229,8 @@ async function sendSubmissionNotification(friendName, problemTitle, questionId, 
   const textContent = `🔥 ${friendName} just solved a LeetCode problem!\n\nProblem: #${questionId} ${problemTitle}\nDifficulty: ${difficulty}\nTime: ${new Date(Number(timestamp) * 1000).toLocaleTimeString()}\n\nSolve Problem: https://leetcode.com/problems/${problemSlug}/${subLinkText}\n\nYour friend is solving. Your turn! 💪`;
 
   if (!transporter) {
-    console.log(`[Email] [SILENT MODE] SMTP details missing in env. Would send email to: ${to}`);
-    console.log(`[Email] Subject: ${subject}`);
-    return { success: true, silent: true };
+    console.warn(`[Email] [MISSING CONFIG] SMTP details (EMAIL_USER / EMAIL_PASSWORD) missing in environment variables. Cannot dispatch email to: ${to}`);
+    return { success: false, silent: true, error: "SMTP credentials not configured" };
   }
 
   try {

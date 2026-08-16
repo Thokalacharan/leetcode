@@ -202,6 +202,14 @@ async function saveSubmission(submission) {
 }
 
 // 4. Check if Submission has been processed
+async function getSubmission(submissionId) {
+  if (useMongoDB) {
+    return await db.collection('submissions').findOne({ id: submissionId });
+  } else {
+    return localData.submissions[submissionId] || null;
+  }
+}
+
 async function isSubmissionProcessed(submissionId) {
   if (useMongoDB) {
     const doc = await db.collection('submissions').findOne({ id: submissionId });
@@ -302,6 +310,7 @@ module.exports = {
   updateFriend,
   deleteFriend,
   saveSubmission,
+  getSubmission,
   isSubmissionProcessed,
   getRecentSubmissions,
   getStats
