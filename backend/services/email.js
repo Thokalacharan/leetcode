@@ -71,6 +71,38 @@ async function sendViaResend(to, from, subject, text, html) {
   return { success: true, messageId: resData.id };
 }
 
+// Send via Brevo HTTP API (works over HTTPS Port 443 to any recipient)
+async function sendViaBrevo(to, from, subject, text, html) {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) return null;
+
+  const senderEmail = process.env.EMAIL_USER || 'notifications@codepulse.dev';
+  const senderName = 'LeetPulse Tracker';
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey.trim(),
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { name: senderName, email: senderEmail },
+      to: [{ email: to }],
+      subject: subject,
+      textContent: text,
+      htmlContent: html
+    })
+  });
+
+  const resData = await response.json();
+  if (!response.ok) {
+    throw new Error(resData.message || 'Brevo API failed');
+  }
+
+  return { success: true, messageId: resData.messageId };
+}
+
 // Generate premium, email-client compatible HTML template
 function generateEmailHtml(friendName, problemTitle, questionId, difficulty, timestamp, problemSlug, submissionId, username) {
   const problemLink = `https://leetcode.com/problems/${problemSlug}/`;
@@ -279,9 +311,23 @@ async function sendSubmissionNotification(friendName, problemTitle, questionId, 
     }
   }
 
-  // 2. Fallback to Nodemailer SMTP
+  // 2. Try sending via Brevo HTTP API if configured
+  if (process.env.BREVO_API_KEY) {
+    try {
+      console.log(`[Email] Dispatching via Brevo HTTP API to ${to}...`);
+      const brevoResult = await sendViaBrevo(to, from, subject, textContent, htmlContent);
+      if (brevoResult && brevoResult.success) {
+        console.log(`[Email] Notification email delivered successfully via Brevo API to ${to}. MessageId: ${brevoResult.messageId}`);
+        return brevoResult;
+      }
+    } catch (brevoError) {
+      console.error("[Email] Brevo API error:", brevoError.message);
+    }
+  }
+
+  // 3. Fallback to Nodemailer SMTP
   if (!transporter) {
-    console.warn(`[Email] [MISSING CONFIG] Neither RESEND_API_KEY nor SMTP credentials (EMAIL_USER / EMAIL_PASSWORD) are configured. Cannot dispatch email to: ${to}`);
+    console.warn(`[Email] [MISSING CONFIG] Neither RESEND_API_KEY, BREVO_API_KEY, nor SMTP credentials (EMAIL_USER / EMAIL_PASSWORD) are configured. Cannot dispatch email to: ${to}`);
     return { success: false, silent: true, error: "Email credentials not configured" };
   }
 
