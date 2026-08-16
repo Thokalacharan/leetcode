@@ -45,7 +45,8 @@ async function sendViaResend(to, from, subject, text, html) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return null;
 
-  const sender = from || 'CodePulse Tracker <onboarding@resend.dev>';
+  // Resend requires using 'onboarding@resend.dev' unless a custom domain is verified
+  const resendFrom = process.env.RESEND_FROM || 'LeetPulse Tracker <onboarding@resend.dev>';
   
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -54,7 +55,7 @@ async function sendViaResend(to, from, subject, text, html) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      from: sender.includes('@resend.dev') ? 'CodePulse Tracker <onboarding@resend.dev>' : sender,
+      from: resendFrom,
       to: [to],
       subject: subject,
       text: text,
